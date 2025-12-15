@@ -8,9 +8,12 @@ const server = http.createServer((req, res) => {
     res.writeHead(200);
     return res.end("OK");
   }
-
   res.writeHead(200);
   res.end(`Hello from ${ID}`);
+//   setTimeout(() => {
+//     res.writeHead(200);
+//     res.end(`Hello from ${ID}`);
+//   }, 5000);
 });
 
 server.listen(PORT, () => {

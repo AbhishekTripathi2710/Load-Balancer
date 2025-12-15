@@ -22,36 +22,62 @@ function getRoutingKey(req){
     return req.headers["x-user-id"] || req.socket.remoteAddress;
 }
 
-const server = http.createServer((clientReq, clientRes) => {
-    const routingKey = getRoutingKey(clientReq);
-    const nodeId = rings.getNode(routingKey);
 
-    if(!nodeId){
-        clientRes.writeHead(503);
-        return clientRes.end("No backend available");
-    }
+function proxyToBackend(backend, clientReq, clientRes){
+    return new Promise((resolve,reject) => {
+        const options = {
+            hostname: backend.host,
+            port: backend.port,
+            path: clientReq.url,
+            method: clientReq.method,
+            headers: clientReq.headers,
+            timeout: 2000,
+        };
 
+        const proxyReq = http.request(options, proxyRes => {
+            if(proxyRes.statusCode >= 500){
+                reject(new Error("5xx from backend"));
+                return;
+            }
+
+            clientRes.writeHead(proxyRes.statusCode, proxyRes.headers);
+            proxyRes.pipe(clientRes);
+            resolve();
+        });
+
+        proxyReq.on("error", reject);
+        proxyReq.on("timeout", () => {
+            proxyReq.destroy();
+            reject(new Error("timeout"));
+        });
+
+        clientReq.pipe(proxyReq);
+    });
+}
+
+
+const server = http.createServer(async (clientReq, clientRes) => {
+  const routingKey = getRoutingKey(clientReq);
+
+  const tried = new Set();
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const nodeId = rings.getNode(routingKey + attempt);
+    if (!nodeId || tried.has(nodeId)) continue;
+
+    tried.add(nodeId);
     const backend = backendMap.get(nodeId);
 
-    const options = {
-        hostname: backend.host,
-        port: backend.port,
-        path: clientReq.url,
-        method: clientReq.method,
-        headers: clientReq.headers,
-    };
+    try {
+      await proxyToBackend(backend, clientReq, clientRes);
+      return; 
+    } catch (err) {
+      console.log(`Retrying after failure on ${nodeId}`);
+    }
+  }
 
-    const proxyReq = http.request(options, proxyRes =>{
-        clientRes.writeHead(proxyRes.statusCode, proxyRes.headers);
-        proxyRes.pipe(clientRes);
-    });
-
-    proxyReq.on("error", () => {
-        clientRes.writeHead(502);
-        clientRes.end("Bad Gateway");
-    });
-
-    clientReq.pipe(proxyReq);
+  clientRes.writeHead(502);
+  clientRes.end("All backends failed");
 });
 
 function checkBackendHealth(backend){
