@@ -1,23 +1,18 @@
 const http = require("http");
 
-const servers = [
-    {id: "Server-1", port: 3001},
-    {id: "Server-2", port: 3002},
-    {id: "Server-3", port: 3003},
-];
+const PORT = process.env.PORT;
+const ID = process.env.ID;
 
-servers.forEach(({id,port}) => {
-    const server = http.createServer((req,res) => {
-        if(req.url === "/health"){
-            res.writeHead(200);
-            return res.end("OK");
-        }
+const server = http.createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(200);
+    return res.end("OK");
+  }
 
-        res.writeHead(200, {"Content-Type":"text/plain"});
-        res.end(`Hello from ${id}`);
-    });
+  res.writeHead(200);
+  res.end(`Hello from ${ID}`);
+});
 
-    server.listen(port, () => {
-        console.log(`${id} running on port ${port}`);
-    });
+server.listen(PORT, () => {
+  console.log(`${ID} running on port ${PORT}`);
 });

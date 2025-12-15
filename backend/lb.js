@@ -10,9 +10,12 @@ const backends = [
 ];
 
 const backendMap = new Map();
+const healthStatus = new Map();
+
 backends.forEach(b => {
     rings.addNode(b.id);
     backendMap.set(b.id,b);
+    healthStatus.set(b.id, true);
 });
 
 function getRoutingKey(req){
@@ -51,6 +54,51 @@ const server = http.createServer((clientReq, clientRes) => {
     clientReq.pipe(proxyReq);
 });
 
+function checkBackendHealth(backend){
+    return new Promise((resolve) => {
+        const options = {
+            hostname: backend.host,
+            port: backend.port,
+            path: "/health",
+            method:"GET",
+            timeout: 2000,
+        };
+
+        const req = http.request(options, res => {
+            resolve(res.statusCode === 200);
+        });
+
+        req.on("error", () => resolve(false));
+        req.on("timeout", () => {
+            req.destroy();
+            resolve(false);
+        });
+
+        req.end();
+    });
+}
+
 server.listen(3000, () => {
     console.log("Load Balancer (Consistent hashing) on port 3000");
 })
+
+async function healthCheckLoop() {
+    for(const backend of backends){
+        const isHealthy = await checkBackendHealth(backend);
+        const wasHealthy = healthStatus.get(backend.id);
+
+        if(isHealthy && !wasHealthy){
+            console.log(`${backend.id} recovered`);
+            rings.addNode(backend.id);
+            healthStatus.set(backend.id,true);
+        }
+
+        if(!isHealthy && wasHealthy){
+            console.log(`${backend.id} down`);
+            rings.removeNode(backend.id);
+            healthStatus.set(backend.id, false);
+        }
+    }
+}
+
+setInterval(healthCheckLoop,5000);
